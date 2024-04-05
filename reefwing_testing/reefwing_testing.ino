@@ -26,6 +26,9 @@
 
 #include <ReefwingAHRS.h>
 #include <ReefwingLSM9DS1.h>
+#include <BasicLinearAlgebra.h>
+
+using namespace BLA;
 
 ReefwingLSM9DS1 imu;
 ReefwingAHRS ahrs;
@@ -102,12 +105,12 @@ void loop() {
 //    previousMillis = millis();
 //  }
 
-  Serial.print("Orientation: ");
-  Serial.print(ahrs.angles.yaw);
-  Serial.print(" ");
-  Serial.print(ahrs.angles.pitch);
-  Serial.print(" ");
-  Serial.println(ahrs.angles.roll);
+//  Serial.print("Orientation: ");
+//  Serial.print(ahrs.angles.yaw);
+//  Serial.print(" ");
+//  Serial.print(ahrs.angles.pitch);
+//  Serial.print(" ");
+//  Serial.println(ahrs.angles.roll);
 
 //  Serial.print("Quaternion: ");
 //  Serial.print(ahrs.getQuaternion().q0);
@@ -124,9 +127,27 @@ void loop() {
   float r1 = 2*(q.q2*q.q3+q.q0*q.q1);
   float r2 = 2*(q.q0*q.q0+q.q3*q.q3)-1;
 
-  float ax = imu.data.ax - r0;
-  float ay = imu.data.ay - r1;
-  float az = imu.data.az - r2;
+//  float ax = imu.data.ax - r0;
+//  float ay = imu.data.ay - r1;
+//  float az = imu.data.az - r2;
+
+  BLA::Matrix<3> gravity = {r0, r1, r2};
+  BLA::Matrix<3> accel = {imu.data.ax, imu.data.ay, imu.data.az};
+
+  float s = (~accel*gravity)(0);
+
+  for(int i = 0; i < 3; i++) {
+    gravity(i) *= s;
+  }
+
+  BLA::Matrix<3> proj = accel - gravity;
+
+//  Serial.print("Projection:\t");
+  Serial.print(proj(0));
+  Serial.print('\t');
+  Serial.print(proj(1));
+  Serial.print('\t');
+  Serial.println(proj(2));
 
 //  Serial.print(r0);
 //  Serial.print('\t');
