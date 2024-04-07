@@ -38,15 +38,15 @@ ReefwingAHRS ahrs;
 bool readData = false;
 const float readThresh = 2.5;
 
-uint32_t dt, t_su, t_sd = 0;
+uint32_t dt = 0;
 
 float cX, cY, cZ = 0;
 
 float prev_time = 0; 
 
-int status;
+int valid = 0;
 
-int i, i_su, i_sd, instances_above_thresh =  0; 
+int i, instances_above_thresh =  0; 
 
 int step_count; 
 
@@ -58,6 +58,7 @@ int step_count;
 BLA::Matrix<3> accel_array[BUF_LENGTH]; // fill this in starting at t_su until receive a t_sd 
 uint32_t time_stamp_array[BUF_LENGTH]; 
 float vert_accel_array[BUF_LENGTH]; 
+BLA::Matrix<3> mov_avg(BLA::Matrix<3> accel_array[], int idx);
 
 void setup() {
   //  Initialise the LSM9DS1 IMU & AHRS
@@ -75,7 +76,7 @@ void setup() {
 
   //  Start Serial and wait for connection
   Serial.begin(115200);
-//  while (!Serial);
+  while (!Serial);
 
   Serial.print("Detected Board - ");
   Serial.println(ahrs.getBoardTypeString());
@@ -104,11 +105,11 @@ void setup() {
   ahrs.setData(imu.data);
   ahrs.update();
   accel_array[0] = {0,0,0}; // projec
-  time_stamp_array[0] = millis(); 
+  time_stamp_array[0] = imu.data.aTimeStamp; 
   i = 1; 
 
 
-  Serial.println(" aX \t aY \t aZ ");
+  Serial.println(" accel \t vel \t pos ");
 }
 
 void loop() {
@@ -177,6 +178,14 @@ void loop() {
   BLA::Matrix<3> gravity = {r0, r1, r2}; // rotated gravity in device xyz coordinate basis 
   BLA::Matrix<3> accel = {imu.data.ax, imu.data.ay, imu.data.az};
 
+//  Serial.print(imu.data.aTimeStamp);
+//  Serial.print(" ");
+//  Serial.print(imu.data.ax);
+//  Serial.print(" ");
+//  Serial.print(imu.data.ay);
+//  Serial.print(" ");
+//  Serial.println(imu.data.az);
+
   float vertical_accel = (~accel*gravity)(0); // dot product 
 
   for(int j = 0; j < 3; j++) {
@@ -185,6 +194,8 @@ void loop() {
 
   BLA::Matrix<3> proj = accel - gravity; // unit g's (not m/s^2)
 
+  float grav_len = sqrt(r0*r0 + r1 * r1 + r2 * r2);
+
 
 
   
@@ -192,13 +203,17 @@ void loop() {
 //  prev_time = time; 
 //  time = millis(); //?? 
 //  dt = time - prev_time; 
-  accel_array[i] = proj; // projec
-  time_stamp_array[i] = imu.data.aTimeStamp; //dt; 
-  vert_accel_array[i] = vertical_accel;
-  i++; 
 
+  if(valid == 1){
+    accel_array[i] = proj; // projec
+    time_stamp_array[i] = imu.data.aTimeStamp; //dt; 
+    vert_accel_array[i] = vertical_accel;
+    i++; 
+  }
 
-  Serial.println(vertical_accel);
+//  Serial.print(grav_len);
+//  Serial.print("\t");
+//  Serial.println(vertical_accel);
   
 
 
@@ -215,31 +230,37 @@ void loop() {
 
 //MM 
   //detect step-down 
-  if(vertical_accel > z_sd_thresh){
-    instances_above_thresh ++; 
-    Serial.println("z accel threshold reached"); 
-  } else {
-    instances_above_thresh = 0; // not multiple instances_above_thresh in a row 
-  }
+//  if(vertical_accel > z_sd_thresh){
+//    instances_above_thresh ++; 
+////    Serial.print("z accel threshold reached: "); 
+////    Serial.println(vertical_accel);
+//  } else {
+//    instances_above_thresh = 0; // not multiple instances_above_thresh in a row 
+//  }
 
-  if(instances_above_thresh >= 2){
-    // if(
-    //   accel_array[i-2][3] < 
-    // ){
-    Serial.print("step down!!!\n"); 
+  if(vertical_accel > z_sd_thresh && (imu.data.aTimeStamp - time_stamp_array[0]) > 50000){
+    Serial.print("step down!!! \t"); 
+    Serial.println(i);
     
     //FOR NOW: step up is the previous step-down 
-    t_su = t_sd; 
-    i_su = i_sd; 
-    i_sd = i; 
-
-    t_sd = millis(); 
     instances_above_thresh = 0; 
-    float step_length = calculate_step_length(accel_array, time_stamp_array, i_su, i); 
-    Serial.print("step length: ");
-    Serial.println(step_length);
+    if(valid == 1 && i > 20) {
+      float step_length = calculate_step_length(accel_array, time_stamp_array, i); 
+      Serial.print("step length (in): ");
+      Serial.println(step_length * 39.37);
+      i = 1;
+      accel_array[0] = proj; // projec
+      time_stamp_array[0] = imu.data.aTimeStamp;
+    }
+    valid = 1;
+  }
+
+  if(i >= BUF_LENGTH - 1){
     i = 1;
-    // }
+    valid = 0;
+    accel_array[0] = proj; // projec
+    time_stamp_array[0] = imu.data.aTimeStamp; 
+//    Serial.println("buf length met");
   }
 
   //TODO: detect step-up 
@@ -301,7 +322,7 @@ void loop() {
 
 // }
 
-float calculate_step_length(BLA::Matrix<3> accel_array[], uint32_t time_stamp_array[], int i_su, int i_sd) { //, uint32_t t_sd, uint32_t t_su){
+float calculate_step_length(BLA::Matrix<3> accel_array[], uint32_t time_stamp_array[], int len) { //, uint32_t t_sd, uint32_t t_su){
   // float step_time = t_sd - t_su; 
 
   // accel_array entry has device xyz acceleration values MINUS any acceleration in the true world z (gravity) axis 
@@ -317,20 +338,63 @@ float calculate_step_length(BLA::Matrix<3> accel_array[], uint32_t time_stamp_ar
   float pz = 0;
   float dt; // time between previous entry and current entry, in seconds 
 
-  for(int i = i_su; i < i_sd; i++){
-    ax = accel_array[i](0) * GRAVITY ; // multiply by gravity to get into m/s^2 rather than g's 
-    ay = accel_array[i](1) * GRAVITY ;
-    az = accel_array[i](2) * GRAVITY ; 
-    dt = ( (float)time_stamp_array[i] - (float)time_stamp_array[i-1] )/ 1000.0; //in seconds instead of ms 
+//  Serial.print("polling instances: ");
+//  Serial.println(len);
+  int buf = 10;
+
+  for(int i = 1 + buf; i < len - buf; i++){
+    BLA::Matrix<3> a_avg = mov_avg(accel_array, i);
+    ax = a_avg(0); // multiply by gravity to get into m/s^2 rather than g's 
+    ay = a_avg(1);
+    az = a_avg(2); 
+    dt = (float)(time_stamp_array[i] - time_stamp_array[i-1] )/ (float)1e6; //in seconds instead of us 
     vx += ax * dt;
     vy += ay * dt;
     vz += az * dt;
     px += vx * dt + 0.5 * ax * dt * dt;
     py += vy * dt + 0.5 * ay * dt * dt; 
     pz += vz * dt + 0.5 * az * dt * dt; 
-    cur_length += sqrt(px*px + py*py + pz*pz);
+//    cur_length += sqrt(px*px + py*py + pz*pz);
+//    if(i == 10){
+//      Serial.print("dt: ");
+//      Serial.print(dt);
+//      Serial.print(" increment length: ");
+//      Serial.print(sqrt(px*px + py*py + pz*pz));
+//      Serial.print(" cur_length: ");
+//      Serial.println(cur_length);
+//    }
+
+//    Serial.print(ax);
+//    Serial.print(" ");
+//    Serial.print(ay);
+//    Serial.print(" ");
+//    Serial.print(az);
+//    Serial.print(" ");
+//    Serial.print(magnitude(ax, ay, az));
+//    Serial.print(" ");
+//    Serial.print(magnitude(vx, vy, vz));
+//    Serial.print(" ");
+//    Serial.println(magnitude(px, py, pz));
   }
 
-  return cur_length; 
+  return magnitude(px, py, pz); 
 
+}
+
+BLA::Matrix<3> mov_avg(BLA::Matrix<3> accel_array[], int idx){
+  float avg_x, avg_y, avg_z = 0;
+  for(int i = idx-5; i < idx+5; i++){
+    avg_x += accel_array[i](0);
+    avg_y += accel_array[i](1); 
+    avg_z += accel_array[i](2);
+  }
+  avg_x *= (GRAVITY / 10.0);
+  avg_y *= (GRAVITY / 10.0);
+  avg_z *= (GRAVITY / 10.0);
+  return {avg_x, avg_y, avg_z};
+
+}
+
+float magnitude(float x, float y, float z){
+  return sqrt(x*x + y*y + z*z);
 }
