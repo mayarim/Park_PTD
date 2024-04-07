@@ -38,7 +38,7 @@ ReefwingAHRS ahrs;
 bool readData = false;
 const float readThresh = 2.5;
 
-uint32_t dt, time, t_su, t_sd = 0;
+uint32_t dt, t_su, t_sd = 0;
 
 float cX, cY, cZ = 0;
 
@@ -103,7 +103,7 @@ void setup() {
   imu.updateSensorData();
   ahrs.setData(imu.data);
   ahrs.update();
-  accel_array[0] = proj; // projec
+  accel_array[0] = {0,0,0}; // projec
   time_stamp_array[0] = millis(); 
   i = 1; 
 
@@ -117,7 +117,7 @@ void loop() {
   ahrs.setData(imu.data); //imu.data is a struct {ax,ay,az,gx,gy,gz,mx,my,mz,gTimeStamp,aTimeStamp,mTimeStamp}
   ahrs.update();
 
-  if( imu.data.aTimeStamp <= time_stamp_array[i-1] ) continue;
+  if( imu.data.aTimeStamp <= time_stamp_array[i-1] ) return;
   //don't do anything if there's no new data (aka old timestamp is same as current timestamp)
 
 /*
@@ -189,24 +189,27 @@ void loop() {
 
   
   //populate array, increment index 
-  prev_time = time; 
-  time = millis(); //?? 
-  dt = time - prev_time; 
+//  prev_time = time; 
+//  time = millis(); //?? 
+//  dt = time - prev_time; 
   accel_array[i] = proj; // projec
   time_stamp_array[i] = imu.data.aTimeStamp; //dt; 
   vert_accel_array[i] = vertical_accel;
   i++; 
+
+
+  Serial.println(vertical_accel);
   
 
 
   // vector of acceleartion in the plane normal to gravity 
 
 //  Serial.print("Projection:\t");
-  Serial.print(proj(0));
-  Serial.print('\t');
-  Serial.print(proj(1));
-  Serial.print('\t');
-  Serial.println(proj(2));
+//  Serial.print(proj(0));
+//  Serial.print('\t');
+//  Serial.print(proj(1));
+//  Serial.print('\t');
+//  Serial.println(proj(2));
 
 
 
@@ -232,8 +235,10 @@ void loop() {
 
     t_sd = millis(); 
     instances_above_thresh = 0; 
-    float step_length = calculate_step_length(accel_array, i_su, i, t_sd, t_su); 
-    Serial.println("step length: %f", step_length);
+    float step_length = calculate_step_length(accel_array, time_stamp_array, i_su, i); 
+    Serial.print("step length: ");
+    Serial.println(step_length);
+    i = 1;
     // }
   }
 
@@ -309,10 +314,10 @@ float calculate_step_length(BLA::Matrix<3> accel_array[], uint32_t time_stamp_ar
   float vz = 0;
   float px = 0;
   float py = 0; 
-  float vz = 0;
+  float pz = 0;
   float dt; // time between previous entry and current entry, in seconds 
 
-  for(int i = i_su + 1; i < i_sd; i++){
+  for(int i = i_su; i < i_sd; i++){
     ax = accel_array[i](0) * GRAVITY ; // multiply by gravity to get into m/s^2 rather than g's 
     ay = accel_array[i](1) * GRAVITY ;
     az = accel_array[i](2) * GRAVITY ; 
