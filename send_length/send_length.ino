@@ -33,6 +33,8 @@ char input = 'G';
 float step_cum = 0;
 float step_target = 0;
 
+bool connectBLE = false;
+
 void setup() {
   imu.begin();
   ahrs.begin();
@@ -110,14 +112,15 @@ void setup() {
     if(Serial.available()){
       input = readChar();
     }
-    BLEDevice central = BLE.central();
-    bleFetch(central);
-    updateLoop(central);
+//    BLEDevice central;
+////    central = BLE.central();
+//    if(connectBLE) bleFetch();
+    updateLoop();
   }
   
 }
 
-void updateLoop(BLEDevice central){
+void updateLoop(){
   imu.updateSensorData();
   ahrs.setData(imu.data); //imu.data is a struct {ax,ay,az,gx,gy,gz,mx,my,mz,gTimeStamp,aTimeStamp,mTimeStamp}
   ahrs.update();
@@ -149,11 +152,12 @@ void updateLoop(BLEDevice central){
       printVector("AVP: ", velIntegral.prev.mag(), velIntegral.cum.mag(), posIntegral.cum.mag());
       break;
     }
-    case 'R':
+    case 'R': {
       resetPos();
       input = 'P';
       break;
-    case 'S':
+    }
+    case 'S': {
       if(notMoving){
         if(posIntegral.cum.mag() > 0.02) {
           printVector("Position: ", posIntegral.cum);
@@ -165,13 +169,14 @@ void updateLoop(BLEDevice central){
           Serial.print(dt.cumDiff(imu.data.aTimeStamp));
           Serial.print(" Timestamp: ");
           Serial.println(imu.data.aTimeStamp); // Tommy wants output: time,step_length
-          bleSend(central, buildDataString(imu.data.aTimeStamp, len));
+          if(connectBLE) bleSend(buildDataString(imu.data.aTimeStamp, len));
         }
         resetPos();
         dt.first = imu.data.aTimeStamp;
       }
       else calculatePos(ag, imu.data.aTimeStamp);
       break;
+    }
     case 'C':
       step_cum = 0;
       input = 'S';
@@ -186,6 +191,16 @@ void updateLoop(BLEDevice central){
 //      posIntegral.reset({0, 0, 0}, imu.data.aTimeStamp);
 //      input = 'Q';
 //      break;
+    case 'Z': {
+      connectBLE = !connectBLE;
+      Serial.print("connectBLE = ");
+      Serial.println(connectBLE);
+      input = 'F';
+      break;
+    }
+    case 'F':
+      if(connectBLE) bleFetch();
+      break;
     default:
       break;
   }
