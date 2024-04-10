@@ -1,12 +1,14 @@
 #include <ReefwingAHRS.h>
 #include <ReefwingLSM9DS1.h>
 #include <BasicLinearAlgebra.h>
+#include <vector_type.h>
 #include <Time.h> 
 
 using namespace BLA;
 
 ReefwingLSM9DS1 imu;
 ReefwingAHRS ahrs;
+Configuration imuConfig;
 
 #define GRAVITY 9.81
 #define BUF_LENGTH 2000
@@ -23,9 +25,9 @@ void setup() {
   
   //  If your IMU isn't autodetected and has a mag you need
   //  to add: ahrs.setDOF(DOF::DOF_9);
-  ahrs.setDOF(DOF::DOF_9);
+//  ahrs.setDOF(DOF::DOF_9);
   ahrs.setFusionAlgorithm(SensorFusion::MAHONY);
-  ahrs.setDeclination(62.9252);
+  ahrs.setDeclination(-9.25059);
 //  ahrs.setAlpha(0.9);
   
 
@@ -37,6 +39,8 @@ void setup() {
   Serial.println(ahrs.getBoardTypeString());
 
   if (imu.connected()) {
+//    imu.setGyroODR(GODR_952Hz);
+    
     Serial.println("LSM9DS1 IMU Connected."); 
     Serial.println("Calibrating IMU...\n"); 
     imu.start();
@@ -46,10 +50,13 @@ void setup() {
 
     delay(20);
     //  Flush the first reading - this is important!
-    //  Particularly after changing the configuration.
+    //  Particularly after changing the imuConfiguration.
     imu.readGyro();
     imu.readAccel();
     imu.readMag();
+
+    imuConfig = imu.getConfig();
+    printConfig();
   } 
   else {
     Serial.println("LSM9DS1 IMU Not Detected.");
@@ -68,6 +75,19 @@ void setup() {
 }
 bool printOrientation = false;
 bool printRawAccel = false;
+bool printFilterAccel = false;
+bool printRawGyro = false;
+bool printCalc = false;
+
+vec3_t p_accel = {0,0,0};
+vec3_t p_raw_accel = {0,0,0};
+uint32_t prev_ts = 0;
+vec3_t vel = {0,0,0};
+vec3_t pos = {0,0,0};
+
+int fc = 5;
+
+
 
 void loop() {
   imu.updateSensorData();
@@ -91,6 +111,83 @@ void loop() {
     Serial.print(" ");
     Serial.println(magnitude(imu.data.ax, imu.data.ay, imu.data.az));
   }
+  if(printFilterAccel){
+    vec3_t a = lowpass_filter({imu.data.ax, imu.data.ay, imu.data.az}, p_raw_accel, fc, 119);
+    Serial.print("Filtered Acceleration: ");
+    Serial.print(a.x);
+    Serial.print(" ");
+    Serial.print(a.y);
+    Serial.print(" ");
+    Serial.print(a.z);
+    Serial.print(" ");
+    Serial.println(a.mag());
+    p_raw_accel = a;
+  }
+  if(printRawGyro){
+    Serial.print("Gyro: ");
+    Serial.print(imu.data.gx);
+    Serial.print(" ");
+    Serial.print(imu.data.gy);
+    Serial.print(" ");
+    Serial.print(imu.data.gz);
+    Serial.print(" ");
+    Serial.println(magnitude(imu.data.gx, imu.data.gy, imu.data.gz));
+  }
+  if(printCalc) {
+    Quaternion q = ahrs.getQuaternion();
+
+    float r0 = 2*(q.q1*q.q3-q.q0*q.q2);
+    float r1 = 2*(q.q2*q.q3+q.q0*q.q1);
+    float r2 = (q.q0*q.q0 - q.q1*q.q1 - q.q2*q.q2 + q.q3*q.q3);
+    float dt = (float)(imu.data.aTimeStamp - prev_ts)/ (float)1e6; //in seconds instead of us 
+    vec3_t gravity = {r0, r1, r2};
+//    vec3_t accel = {imu.data.ax, imu.data.ay, imu.data.az};
+    vec3_t accel = lowpass_filter({imu.data.ax, imu.data.ay, imu.data.az}, p_raw_accel, fc, 119);
+    p_raw_accel = accel;
+    
+
+    vec3_t sub_grav = (accel - gravity)*GRAVITY;
+    vec3_t proj_accel = (accel - accel.dot(gravity)*gravity) * GRAVITY;
+
+    vec3_t a = sub_grav;
+
+    vec3_t dv = (a+p_accel)*0.5*dt;
+    pos += (vel + dv * 0.5) * dt;
+    vel += dv;
+//    a = lowpass_filter(a, p_accel, 1, 119);
+    p_accel = a;
+
+    vec3_t gyro = {imu.data.gx, imu.data.gy, imu.data.gz};
+//    
+//    Serial.print("Accel: ");
+//    Serial.print(a.x);
+//    Serial.print(" ");
+//    Serial.print(a.y);
+//    Serial.print(" ");
+//    Serial.println(a.z);
+//    
+//    Serial.print("Gyro: ");
+//    Serial.print(gyro.x);
+//    Serial.print(" ");
+//    Serial.print(gyro.y);
+//    Serial.print(" ");
+//    Serial.println(gyro.z);
+//    Serial.print(sub_grav.mag());
+//    Serial.print(" ");
+//    Serial.print(proj_accel.mag());
+//    Serial.print(" ");
+//    Serial.print(dt);
+//    Serial.print(" ");
+//    Serial.println((sub_grav - proj_accel).mag());
+      Serial.print(a.x);
+      Serial.print(" ");
+      Serial.print(vel.x);
+      Serial.print(" ");
+      Serial.print(pos.x);
+      Serial.print(" ");
+      Serial.println(isMoving(a, gyro) * 10);
+  }
+  prev_ts = imu.data.aTimeStamp;
   if(!Serial.available()) return;
     switch(readChar()){
         case 'M':
@@ -102,10 +199,51 @@ void loop() {
         case 'A':
           printRawAccel = !printRawAccel;
           break;
+        case 'G':
+          printRawGyro = !printRawGyro;
+          break;
+        case 'C':
+          printCalc = !printCalc;
+          break;
+        case 'F':
+          printFilterAccel = !printFilterAccel;
+          break;
+        case 'S':
+          readAnswer("Frequency Cutoff value ", fc);
+          break;
+        case 'R':
+          p_accel = {0,0,0};
+          vel = {0,0,0};
+          pos = {0,0,0};
+          break;
+          
     }
 }
 
+#define ACCEL_THRESH 0.35
+#define GYRO_THRESH 3.0
+#define SAMPLE_THRESH 10
 float accel_thresh = 0.02;
+int zero_samples = 0;
+bool isMoving(vec3_t a, vec3_t g){
+  if(abs(a.x) <= ACCEL_THRESH &&
+      abs(a.y) <= ACCEL_THRESH && 
+      abs(a.z) <= ACCEL_THRESH
+    ){
+      Serial.println("accel thresh low");
+      if(abs(g.x) <= GYRO_THRESH && 
+      abs(g.y) <= GYRO_THRESH && 
+      abs(g.z) <= GYRO_THRESH
+      ){
+        Serial.println("gyro thresh low");
+        zero_samples++;
+      }
+    }else{
+//      Serial.println("moving");
+      zero_samples = 0;
+    }
+    return zero_samples >= SAMPLE_THRESH;
+}
 void measure(){
     int i = 0; 
     Serial.println("Mesuring...");
@@ -135,11 +273,11 @@ void measure(){
         }
 
         BLA::Matrix<3> proj = accel - gravity; // unit g's (not m/s^2)
-//        accel_array[i] = proj;
-        float ax_mod = abs(imu.data.ax) > accel_thresh ? imu.data.ax : 0;
-        float ay_mod = abs(imu.data.ay) > accel_thresh ? imu.data.ay : 0;
-        float az_mod = abs(imu.data.az) > accel_thresh ? imu.data.az : 0;
-        accel_array[i] = {ax_mod, ay_mod, az_mod};
+        accel_array[i] = proj;
+//        float ax_mod = abs(imu.data.ax) > accel_thresh ? imu.data.ax : 0;
+//        float ay_mod = abs(imu.data.ay) > accel_thresh ? imu.data.ay : 0;
+//        float az_mod = abs(imu.data.az) > accel_thresh ? imu.data.az : 0;
+//        accel_array[i] = {ax_mod, ay_mod, az_mod};
         time_stamp_array[i] = imu.data.aTimeStamp;
         if(i >= BUF_LENGTH - 1) break;
         i++;
@@ -158,20 +296,14 @@ char readChar()
    return ch;
 }
 
-
-//BLA::Matrix<3> mov_avg(BLA::Matrix<3> accel_array[], int idx){
-//  float avg_x, avg_y, avg_z = 0;
-//  for(int i = idx-5; i < idx+5; i++){
-//    avg_x += accel_array[i](0);
-//    avg_y += accel_array[i](1); 
-//    avg_z += accel_array[i](2);
-//  }
-//  avg_x *= (GRAVITY / 10.0);
-//  avg_y *= (GRAVITY / 10.0);
-//  avg_z *= (GRAVITY / 10.0);
-//  return {avg_x, avg_y, avg_z};
-//
-//}
+vec3_t lowpass_filter(vec3_t v, vec3_t prev, float fc, float fs){
+  float tau = 1/(2.0*PI*fc);
+  float alpha = (1.0/fs) / (tau + (1.0/fs));
+  
+//  output[0] = alpha*input[0];
+  return prev + alpha*(v - prev);
+  
+}
 
 float magnitude(float x, float y, float z){
   return sqrt(x*x + y*y + z*z);
@@ -206,9 +338,9 @@ float calculate_step_length(BLA::Matrix<3> accel_array[], uint32_t time_stamp_ar
     ax = a(0) * GRAVITY; // multiply by gravity to get into m/s^2 rather than g's 
     ay = a(1) * GRAVITY;
     az = a(2) * GRAVITY; 
-    magn_a = magnitude(ax,ay,az) - 1*GRAVITY;
-    magn_v += magn_a * dt;
-    magn_p += magn_v * dt; 
+//    magn_a = magnitude(ax,ay,az) - 1*GRAVITY;
+//    magn_v += magn_a * dt;
+//    magn_p += magn_v * dt; 
     float bx = b(0) * GRAVITY;
     float by = b(1) * GRAVITY;
     float bz = b(2) * GRAVITY;
@@ -240,19 +372,99 @@ float calculate_step_length(BLA::Matrix<3> accel_array[], uint32_t time_stamp_ar
 //    Serial.print(ay);
 //    Serial.print(" ");
 //    Serial.println(az);
-    Serial.print(magn_a);
+//    Serial.print(magn_a);
+//    Serial.print(" ");
+//    Serial.print(magn_v);
+//    Serial.print(" ");
+//    Serial.println(magn_p);
     Serial.print(" ");
-    Serial.print(magn_v);
+    Serial.print(magnitude(ax, ay, az));
     Serial.print(" ");
-    Serial.println(magn_p);
-//    Serial.print(" ");
-//    Serial.print(magnitude(ax, ay, az));
-//    Serial.print(" ");
-//    Serial.print(magnitude(vx, vy, vz));
-//    Serial.print(" ");
-//    Serial.println(magnitude(px, py, pz));
+    Serial.print(magnitude(vx, vy, vz));
+    Serial.print(" ");
+    Serial.println(magnitude(px, py, pz));
   }
-    return magn_p; 
-//  return magnitude(px, py, pz); 
+//    return magn_p; 
+  return magnitude(px, py, pz); 
 
+}
+
+void printConfig() {
+  Serial.println("\n  ========  IMU Configuration    ========");
+  Serial.print("Gyro/Accel FIFO Enabled: "); Serial.println(imuConfig.gyroAccelFIFOEnabled ? "True" : "False");
+  Serial.print("FIFO Mode (0 = BYPASS, 1 = FIFO_THS, 3 = CONT_TO_FIFO, 4 = BYPASS_TO_CONT, 6 = FIFO_CONT): "); 
+  Serial.println(imuConfig.fifoMode);
+  Serial.print("FIFO Threshold: "); Serial.println(imuConfig.fifoThreshold);
+  Serial.print("Gyro/Accel Operating Mode (0 = OFF, 1 = ACCEL, 2 = NORMAL, 3 = LOW_PWR): "); 
+  Serial.println(imuConfig.gyroAccelOpMode);
+
+  Serial.println("\n  ========  GYRO Configuration    ========");
+  Serial.print("Power Down: "); Serial.print(imuConfig.gyro.powerDown ? "True" : "False");
+  Serial.print(", Sleep Enabled: "); Serial.print(imuConfig.gyro.sleepEnabled ? "True" : "False");
+  Serial.print(", Low Power Enabled: "); Serial.println(imuConfig.gyro.lowPowerEnabled ? "True" : "False");
+  Serial.print("Full Scale (0 = 245, 1 = 500, 2 = 2000 DPS): "); Serial.println(imuConfig.gyro.scale);
+  Serial.print("ODR (0 = OFF, 1 = 14.9, 2 = 59.5, 3 = 119, 4 = 238, 5 = 476, 6 = 952 Hz): "); 
+  Serial.println(imuConfig.gyro.sampleRate);
+  Serial.print("Bandwidth (0 = LOW, 1 = MID, 2 = HIGH, 3 = MAX): "); Serial.println(imuConfig.gyro.bandwidth);
+  Serial.print("Orientation: (0 = XYZ): "); Serial.print(imuConfig.gyro.orientation);
+  Serial.print(", Sign (0 = NONE): "); Serial.println(imuConfig.gyro.reverseSign);
+  Serial.print("Raw Bias Offset, X: "); Serial.print(imuConfig.gyro.bias.x);
+  Serial.print(", Y: "); Serial.print(imuConfig.gyro.bias.y);
+  Serial.print(", Z: "); Serial.println(imuConfig.gyro.bias.z);
+
+  Serial.println("\n  ========  ACCEL Configuration    ========");
+  Serial.print("Power Down (True in NORMAL mode): "); Serial.println(imuConfig.accel.powerDown ? "True" : "False");
+  Serial.print("Enable Auto Bandwidth: "); Serial.println(imuConfig.accel.autoBandwidthEnable ? "True" : "False");
+  Serial.print("Scale (0 = 2, 1 = 16, 2 = 4, 3 = 8 G's): "); Serial.println(imuConfig.accel.scale);
+  Serial.print("ODR (0 = OFF, 1 = 10, 2 = 50, 3 = 119, 4 = 238, 5 = 476, 6 = 952, 7 = Gyro ODR): "); 
+  Serial.println(imuConfig.accel.sampleRate);
+  Serial.print("Bandwidth (0 = 408, 1 = 211, 2 = 105, 3 = 50 Hz): "); 
+  Serial.println(imuConfig.accel.bandwidth);
+  Serial.print("Raw Bias Offset, X: "); Serial.print(imuConfig.accel.bias.x);
+  Serial.print(", Y: "); Serial.print(imuConfig.accel.bias.y);
+  Serial.print(", Z: "); Serial.println(imuConfig.accel.bias.z);
+
+  Serial.println("\n  ========  MAG Configuration    ========");
+  Serial.print("Fast ODR Enabled: "); Serial.print(imuConfig.mag.fastODR ? "True" : "False");
+  Serial.print(", Temp Compensation Enabled: "); Serial.println(imuConfig.mag.temperatureCompensated ? "True" : "False");
+  Serial.print("Operating Mode (0 = LOW, 1 = MED, 2 = HIGH, 3 = ULTRA): "); 
+  Serial.println(imuConfig.mag.opMode);
+  Serial.print("Sample Mode (0 = CONT, 1 = SINGLE, 2 = IDLE): "); 
+  Serial.println(imuConfig.mag.sampleMode);
+  Serial.print("Scale (0 = 4, 1 = 8, 2 = 12, 3 = 16 gauss): "); 
+  Serial.println(imuConfig.mag.scale);
+  Serial.println("ODR (0 = 0.625, 1 = 1.25, 2 = 2.5, 3 = 5, 4 = 10, 5 = 20, 6 = 40, 7 = 80 Hz..."); 
+  Serial.print("...FAST ODR 8 = 155, 9 = 300, 10 = 560, 11 = 1000 Hz): ");
+  Serial.println(imuConfig.mag.sampleRate);
+  Serial.print("Raw Bias Offset, X: "); Serial.print(imuConfig.mag.bias.x);
+  Serial.print(", Y: "); Serial.print(imuConfig.mag.bias.y);
+  Serial.print(", Z: "); Serial.println(imuConfig.mag.bias.z);
+
+  Serial.println("\n  ========  TEMPERATURE Configuration    ========");
+  Serial.print("Temp Offset: "); Serial.print(imuConfig.temp.offset); Serial.println("°C\n");
+  Serial.println("-----------------------------------------------------------------------------\n");
+}
+
+void readAnswer(char msg[], int& param)
+{ char ch=0;
+  byte count=0;
+  const byte NofChars = 8;
+  char ans[NofChars];
+//  float val;
+  while (Serial.available()){Serial.read();}  //empty read buffer
+  Serial.print(msg); 
+  Serial.print(param); 
+  Serial.print(F(" Enter new value ")); 
+  while (byte(ch)!=10 && byte(ch)!=13 && count<(NofChars-1)   )
+  {  if (Serial.available())
+     {  ch= Serial.read();
+        ans[count]=ch;
+        count++;
+     }
+  }      
+  ans[count]=0;
+  Serial.println(ans);
+  if (count>1) param= atoi(ans);
+  while (Serial.available()){Serial.read();}
+     Serial.println("\n\n\n\n\n\n\n"); 
 }
