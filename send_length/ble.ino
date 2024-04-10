@@ -1,10 +1,13 @@
-void bleFetch(BLEDevice central){
-  // if central not connected
-  if(!central || !central.connected()){
-    Serial.println("bleFetch: No device available!!!");
+BLEDevice c;
+void bleFetch(){
+//    BLEDevice c;
+    c = BLE.central();
+//  // if central not connected
+  if(!c || !c.connected()){
+//    Serial.println("bleFetch: No device available!!!");
     return;
   }
-  // If value available
+//  // If value available
   if(writeCharacteristic.written()){
     step_target = writeCharacteristic.value();
     Serial.print("New step length target: ");
@@ -12,9 +15,11 @@ void bleFetch(BLEDevice central){
   }
 }
 
-void bleSend(BLEDevice central, String data){
+void bleSend(String data){
+//  BLEDevice c;
+  c = BLE.central();
   // if not connected
-  if(!central || !central.connected()){
+  if(!c || !c.connected()){
     Serial.println("BleSend: Data not sent!!!");
     return;
   }
