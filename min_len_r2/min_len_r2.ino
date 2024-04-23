@@ -1,5 +1,5 @@
 #include <ReefwingAHRS.h>
-#include <ReefwingLSM9DS1.h>
+#include <Arduino_BMI270_BMM150.h>
 #include <vector_type.h>
 #include "Filter.h"
 #include "Integral.h"
@@ -12,17 +12,15 @@ Adafruit_DRV2605 drv;
 BLEService dataService("180A");
 
 // Left Device
-//BLEStringCharacteristic dataCharacteristic("0000AAAA-0000-1000-8000-00805F9B34FB", BLERead | BLENotify, 128); // 20 is the maximum length of the string
-//BLEFloatCharacteristic writeCharacteristic("0000BBBB-0000-1000-8000-00805F9B34FB", BLEWrite);
+BLEStringCharacteristic dataCharacteristic("0000AAAA-0000-1000-8000-00805F9B34FB", BLERead | BLENotify, 128); // 20 is the maximum length of the string
+BLEFloatCharacteristic writeCharacteristic("0000BBBB-0000-1000-8000-00805F9B34FB", BLEWrite);
 
 // Right Device
-BLEStringCharacteristic dataCharacteristic("2A57", BLERead | BLENotify, 128);
-BLEFloatCharacteristic writeCharacteristic("6E400002-B5A3-F393-E0A9-E50E24DCCA9E", BLEWrite);
+//BLEStringCharacteristic dataCharacteristic("2A57", BLERead | BLENotify, 128);
+//BLEFloatCharacteristic writeCharacteristic("6E400002-B5A3-F393-E0A9-E50E24DCCA9E", BLEWrite);
 
-
-ReefwingLSM9DS1 imu;
+SensorData data;
 ReefwingAHRS ahrs;
-//Configuration imuConfig;
 
 Filter accelFilter, gyroFilter;
 Integral velIntegral, posIntegral;
@@ -47,7 +45,6 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH); // turn on the built-in LED
   
-  imu.begin();
   ahrs.begin();
 
   accelFilter.begin(5, 119); 
@@ -78,8 +75,8 @@ void setup() {
   while(!BLE.begin()){
     delay(10);
   }
-  BLE.setLocalName("Right Step Detector");
-//  BLE.setLocalName("Left Step Detector");
+//  BLE.setLocalName("Right Step Detector");
+  BLE.setLocalName("Left Step Detector");
   BLE.setAdvertisedService(dataService);
   BLE.setAdvertisingInterval(100);
 
@@ -95,36 +92,8 @@ void setup() {
  //   Serial.println("BLE Started.");
 
   // Init IMU
-  if (imu.connected()) {
-    imu.setGyroODR(GODR_952Hz);
-//    Serial.println("LSM9DS1 IMU Connected."); 
-//    Serial.println("Calibrating IMU...\n"); 
-    imu.start();
-    imu.calibrateGyro();
-    imu.calibrateAccel();
-    imu.calibrateMag();
-
-    delay(20);
-    //  Flush the first reading - this is important!
-    //  Particularly after changing the imuConfiguration.
-    imu.readGyro();
-    imu.readAccel();
-    imu.readMag();
-
-
-/***********************
- * DON'T USE imu.getConfig()
- * For some reason causes gyro to have non-zero readings when device is not moving
- */
-//    imuConfig = imu.getConfig(); 
-//    printConfig();
-
-//    imu.updateSensorData();
-//    resetIntegrals();
-  } 
-  else {
-//    Serial.println("LSM9DS1 IMU Not Detected.");
-    while(1);
+  while(!IMU.begin()){
+    delay(10);
   }
 
 //  Serial.println("Ready!!!\n");
@@ -142,15 +111,26 @@ void setup() {
 }
 
 void minUpdate(){
-  imu.updateSensorData();
-  ahrs.setData(imu.data); //imu.data is a struct {ax,ay,az,gx,gy,gz,mx,my,mz,gTimeStamp,aTimeStamp,mTimeStamp}
+  if (IMU.gyroscopeAvailable()) {  
+    IMU.readGyroscope(data.gx, data.gy, data.gz);
+    data.gTimeStamp = micros();
+  }
+  if (IMU.accelerationAvailable()) {  
+    IMU.readAcceleration(data.ax, data.ay, data.az);  
+    data.aTimeStamp = micros();
+  }
+  if (IMU.magneticFieldAvailable()) {
+    IMU.readMagneticField(data.mx, data.my, data.mz);
+    data.mTimeStamp = micros();
+  }
+  ahrs.setData(data); //data is a struct {ax,ay,az,gx,gy,gz,mx,my,mz,gTimeStamp,aTimeStamp,mTimeStamp}
   ahrs.update();
 }
 
 void updateLoop(){
   minUpdate();
-  vec3_t accel = getAccel(imu.data);
-  vec3_t gyro = getGyro(imu.data);
+  vec3_t accel = getAccel(data);
+  vec3_t gyro = getGyro(data);
   vec3_t accel_filtered = accelFilter.step(accel);
   vec3_t gyro_filtered = gyroFilter.step(gyro);
   vec3_t gravity = getGravity(ahrs.getQuaternion());
@@ -172,18 +152,18 @@ void updateLoop(){
     //      Serial.print("Cumulative dist: ");
      //     Serial.print(step_cum);
       //    Serial.print(" Total Time: ");
-     //     Serial.print(dt.cumDiff(imu.data.aTimeStamp));
+     //     Serial.print(dt.cumDiff(data.aTimeStamp));
       //    Serial.print(" Timestamp: ");
-      //    Serial.println(imu.data.aTimeStamp); // Tommy wants output: time,step_length
+      //    Serial.println(data.aTimeStamp); // Tommy wants output: time,step_length
           if(len < step_target){
             vibrate();
           }
-          if(connectBLE) bleSend(buildDataString(imu.data.aTimeStamp, len));
+          if(connectBLE) bleSend(buildDataString(data.aTimeStamp, len));
         }
         resetPos();
-        dt.first = imu.data.aTimeStamp;
+        dt.first = data.aTimeStamp;
       }
-      else calculatePos(ag, imu.data.aTimeStamp);
+      else calculatePos(ag, data.aTimeStamp);
       break;
     }
     case 'C':
@@ -232,20 +212,20 @@ vec3_t subtractGravity(vec3_t a, vec3_t g){
 }
 
 vec3_t calculatePos(vec3_t a, uint32_t ts){
-  float delta = dt.step(imu.data.aTimeStamp);
+  float delta = dt.step(data.aTimeStamp);
   return posIntegral.step(velIntegral.step(a, delta), delta);
 }
 
 void resetPos(){
-  velIntegral.reset(getAccel(imu.data));
+  velIntegral.reset(getAccel(data));
   posIntegral.reset({0, 0, 0});
-  dt.set(imu.data.aTimeStamp);
+  dt.set(data.aTimeStamp);
 }
 
 void resetVelocity() {
-  velIntegral.reset(getAccel(imu.data));
+  velIntegral.reset(getAccel(data));
   posIntegral.resetPrev({0, 0, 0});
-  dt.set(imu.data.aTimeStamp);
+  dt.set(data.aTimeStamp);
 }
 
 void vibrate(){
