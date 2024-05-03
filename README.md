@@ -1,10 +1,20 @@
 # Park_PTD
 Cueing device for Parkinson's patients in physical therapy for gait training.
-This repository holds the Arduino code for this project. This code was written and tested on the Arduino Nano 33 BLE Rev1 and Rev2. Other hardware components include:
-- DRV2605L haptic motor driver
-- Mini Vibration Disc Motor
+This repository holds the Arduino code for this project. This code was written and tested on the Arduino Nano 33 BLE Rev1 and Rev2, available at https://store-usa.arduino.cc/products/nano-33-ble-sense-rev2. 
+
+Other hardware components include:
+- DRV2605L haptic motor driver https://www.adafruit.com/product/2305
+- Mini Vibration Disc Motor https://www.adafruit.com/product/1201
 
 The main functionality of the code in this repository is to utilize the Arduino Nano 33 BLE's built-in 9-axis IMU to detect steps when worn on or near the ankle and calculate the length of each step taken. If that step is below a given threshold haptic feedback is provided via the vibration disc motor. This provides a cue to patients wearing the device to lengthen their steps.
+
+Integration of the physical components is shown in the following figure:
+
+<img src="https://github.com/mayarim/Park_PTD/assets/75183224/f88b7426-1d35-448c-9af0-bba432eb4d0e" width="300">
+
+Components: (1) Ankle Strap, (2) Arduino Nano 33 BLE, (3) DRV2605L Motor Controller, (4) Mini Vibration Disc Motor, (5) 9 Volt Battery. 
+
+CAD files for 3D-printed casing designs are in the **casing_3Dmodels** folder.
 
 ## Arduino Sketches
 ### calculate_length / calc_len_r2
