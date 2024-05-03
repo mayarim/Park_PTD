@@ -32,6 +32,25 @@ This is *NOT* an Arduino sketch. It is a Processing (https://processing.org/) sk
 ### Note
 The *_r2* version of these Arduino sketches is the version of the sketch for the Arduino Nano 33 BLE Rev2. The sketches without *_r2* at the end are for Rev1. This difference is important as the Rev2 contains a different IMU than the Rev1 and the Rev1 sketches use the Reefwing_LSM9DS1 library to configure the IMU and access the data. The Rev2 sketches use the standard Arduino library Arduino_BMI270_BMM150 for access to the IMU values.
 
+## Files
+The files in each sketch other than the main file are identical and are helpers to the main file.
+### Main File: calculate_length.ino / send_len.ino / min_len.ino
+These files are the main sketch files and contain the overall setup and loop logic. The primary calculations for the step length detection and measurement are all implemented in these respective files.
+### Filter.h + Filter.cpp
+These files define the interface and implement two classes used in the main files: Filter and ZVU.
+#### Filter
+This is a class that implements a low-pass filter for data based on inputted parameters.
+#### ZVU
+This outputs a 0 or 1 based on whether there has been significant acceleration activity recently. This was based on the Zero Velocity Update algorithm from https://github.com/Wojtek120/IMU-velocity-and-displacement-measurements/tree/master.
+### Integral.h + Integral.cpp
+These files define and implement the Integral and DeltaTime classes.
+#### Integral
+Performs discrete integration using trapezoidal summation. Every input via the step() function is an integration step.
+#### DeltaTime
+This is a helper class for Integral which helps to calculate the time in seconds between IMU updates. This also converts the measurements from microseconds to seconds.
+### Utility.ino
+This contains miscellaneous methods that abstract away some repeatedly used code segments. 
+
 ## Libraries Used
 - https://www.arduino.cc/reference/en/libraries/reefwingahrs/
 - https://www.arduino.cc/reference/en/libraries/reefwing_imutypes/
